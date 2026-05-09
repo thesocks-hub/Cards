@@ -895,6 +895,8 @@ function render(){
   var isWM=state.tab==='works';
   app.innerHTML=
     '<div class="top-bar"><select class="work-select" onchange="state.activeWork=parseInt(this.value);save();render()">'+wOpts+'</select></div>'
+    +'<div class="sync-bar"><span class="sync-status'+(state.syncStatus==='ok'?' ok':state.syncStatus==='err'?' err':state.syncStatus==='ing'?' ing':'')+'">'+(state.syncStatus==='ok'?'&#x2713; 同期完了':state.syncStatus==='err'?'&#x2717; エラー':state.syncStatus==='ing'?'同期中...':'')+'</span><button class="btn" style="margin-left:auto" onclick="state.syncModal=true;render()">&#x21C5; 同期</button></div>'
+    +(state.syncModal?'<div class="modal-bg" onclick="if(event.target===this){state.syncModal=false;render()}"><div class="modal" onclick="event.stopPropagation()"><h3>クラウド同期</h3><input type="password" placeholder="同期トークン" value="'+state.syncToken.replace(/"/g,'&quot;')+'" oninput="state.syncToken=this.value"><p style="font-size:11px;color:var(--text3);margin:-8px 0 12px">※ 全端末で同じトークンを使ってください</p><div class="modal-btns"><button onclick="state.syncModal=false;render()">キャンセル</button><button onclick="syncDownload()">&#x2193; 取得</button><button class="btn-primary" onclick="syncUpload()">&#x2191; 送信</button></div></div></div>':'')
     +(!isWM?'<div class="logline-bar"><textarea class="logline-input" rows="2" placeholder="ログライン（作品概要）…" onblur="setWorkLogline(this.value)">'+getWorkLogline().replace(/</g,'&lt;')+'</textarea></div>':'')
     +(!isWM?'<div class="quick-add"><textarea id="card-input" rows="3" placeholder="アイデアをメモ…" oninput="state.newText=this.value">'+state.newText.replace(/</g,'&lt;')+'</textarea>'
       +'<div class="quick-footer"><div class="tag-pills">'+tagPills+'</div>'
