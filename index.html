@@ -604,9 +604,14 @@ function decryptData(b64,pass){
 function syncUpload(){
   var token=state.syncToken.trim();
   if(!token){alert('同期トークンを入力してください');return;}
-  var slim=state.cards.map(function(c){var r={};for(var k in c){if(k!=='sketch')r[k]=c[k];}return r;});
-  var data=JSON.stringify({works:state.works,activeWork:state.activeWork,cards:slim,nextId:state.nextId,pageData:state.pageData,secLoglines:state.secLoglines,secSortMode:state.secSortMode});
+  // スケッチ込みで全カードを含める
+  var cards=state.cards.map(function(c){return Object.assign({},c);});
+  var data=JSON.stringify({works:state.works,activeWork:state.activeWork,cards:cards,nextId:state.nextId,pageData:state.pageData,secLoglines:state.secLoglines,secSortMode:state.secSortMode});
   var encrypted=encryptData(data,token);
+  // 25MB制限チェック
+  if(encrypted.length>24*1024*1024){
+    alert('データが大きすぎます（25MB超）。スケッチを減らしてから試してください。');return;
+  }
   state.syncStatus='ing';render();
   fetch(WORKER_URL,{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':token},body:JSON.stringify({data:encrypted})})
     .then(function(r){return r.json();})
@@ -621,11 +626,14 @@ function syncDownload(){
   fetch(WORKER_URL,{headers:{'X-Auth-Token':token}})
     .then(function(r){return r.json();})
     .then(function(r){
-      if(!r.data){state.syncStatus='err';render();setTimeout(function(){state.syncStatus='';render();},3000);return;}
+      if(!r.data){state.syncStatus='err';alert('クラウドにデータがありません。先に送信してください。');render();setTimeout(function(){state.syncStatus='';render();},3000);return;}
       var decrypted=decryptData(r.data,token);
       if(!decrypted){state.syncStatus='err';alert('復号失敗。トークンが違う可能性があります。');render();return;}
       var data=JSON.parse(decrypted);
       if(data.works)data.works=data.works.map(function(w){return Object.assign({logline:''},w);});
+      // スケッチをlocalStorageとIDBに保存
+      var cards=data.cards||[];
+      cards.forEach(function(c){if(c.sketch)saveSketchStorage(c.id,c.sketch);});
       Object.assign(state,data,{showModal:false,sketchModal:null,editingCardId:null,pageAddModal:null,syncModal:false});
       save();state.syncStatus='ok';render();setTimeout(function(){state.syncStatus='';render();},3000);
     })
