@@ -75,6 +75,7 @@ button,select,input,textarea{font-family:inherit}
 .tag-memo{border-left:3px solid var(--memo)}.tag-memo .card-tag-badge{background:var(--memo-bg);color:var(--memo);border:1px solid var(--memo-border)}
 .tag-note{border-left:3px solid var(--note)}.tag-note .card-tag-badge{background:var(--note-bg);color:var(--note);border:1px solid var(--note-border)}
 .card-page-select{font-size:11px;padding:2px 5px;border:0.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text2);cursor:pointer}
+.card-char-input{font-size:11px;padding:2px 7px;border:0.5px solid var(--serif-border);border-radius:10px;background:var(--serif-bg);color:var(--serif);outline:none;width:80px;min-width:50px}
 .card-text{font-size:14px;color:var(--text);line-height:1.6;white-space:pre-wrap;word-break:break-all}
 .card-edit-area{width:100%;font-size:14px;line-height:1.6;border:0.5px solid var(--border2);border-radius:6px;padding:6px 8px;background:var(--bg);color:var(--text);resize:none;outline:none;min-height:60px}
 .card-sketch-thumb{width:100%;height:auto;border-radius:6px;border:0.5px solid var(--border);display:block;cursor:pointer;background:#fff}
@@ -521,6 +522,10 @@ function saveEdit(id){
   state.cards=state.cards.map(function(c){return c.id===id?Object.assign({},c,{text:text,tag:tag}):c;});
   state.editingCardId=null;state.editingText='';state.editingTag=null;save();render();
 }
+function updateCardChar(id,val){
+  state.cards=state.cards.map(function(c){return c.id===id?Object.assign({},c,{charName:val}):c;});
+  save();
+}
 function cancelEdit(){state.editingCardId=null;state.editingText='';state.editingTag=null;render();}
 
 var skCanvas=null,skCtx=null,skOff=null,skOffCtx=null,drawing=false;
@@ -708,6 +713,7 @@ function fullCardHTML(c,secOpts,ctx,ctxVal){
     +' ondrop="handleDropOnCard(event,'+c.id+',\''+ctx+'\',\''+ctxVal+'\')">'
     +'<div class="card-top">'
     +'<span class="card-tag-badge">'+TAG_LABELS[tag]+'</span>'
+    +(tag==='serif'?'<input class="card-char-input" type="text" placeholder="人物名" value="'+(c.charName||'').replace(/"/g,'&quot;')+'" onclick="event.stopPropagation()" onchange="updateCardChar('+c.id+',this.value)">':'')
     +'<select class="card-page-select" onclick="event.stopPropagation()" onchange="moveCardToPage('+c.id+',this.value)">'+pOpts+'</select>'
     +(editing?tagSelectEdit(tag):'')+'</div>'
     +(editing
@@ -735,6 +741,7 @@ function compactCardHTML(c,mOpts,pn){
     +' onclick="startEdit('+c.id+')">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:4px">'
     +'<span class="card-compact-tag">'+TAG_LABELS[tag]+'</span>'
+    +(tag==='serif'?'<input class="card-char-input" type="text" placeholder="人物名" value="'+(c.charName||'').replace(/"/g,'&quot;')+'" onclick="event.stopPropagation()" onchange="updateCardChar('+c.id+',this.value)" style="max-width:60px">':'')
     +'<div style="display:flex;gap:3px" onclick="event.stopPropagation()">'
     +'<select style="font-size:10px;padding:1px 3px;border:0.5px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text2)" onchange="moveCardToPage('+c.id+',parseInt(this.value));this.value=\'\'">'
     +'<option value="" disabled selected>&#x21D5;p</option>'+mOpts+'</select>'
