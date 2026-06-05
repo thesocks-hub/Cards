@@ -200,7 +200,10 @@ var state={
   pageAddModal:null,
   syncToken:'',
   syncStatus:'',
-  syncModal:false
+  syncModal:false,
+  syncLastAt:0,
+  syncDirty:false,
+  deviceName:''
 };
 
 var db=null;
@@ -246,6 +249,7 @@ function lsSave(data){try{localStorage.setItem('manga_v5',JSON.stringify(data));
 function lsLoad(){try{var s=localStorage.getItem('manga_v5');return s?JSON.parse(s):null;}catch(e){return null;}}
 
 function save(){
+  state.syncDirty=true;
   var slim=state.cards.map(function(c){
     var r={};
     for(var k in c){if(k!=='sketch')r[k]=c[k];}
@@ -606,6 +610,17 @@ function openSketch(cardId){state.sketchModal={cardId:cardId};render();}
 function openSketchNew(){state.sketchModal={cardId:null};render();}
 
 var WORKER_URL='https://cards-sync.thesocks.workers.dev';
+function timeAgo(ts){
+  if(!ts)return '未同期';
+  var s=Math.floor((Date.now()-ts)/1000);
+  if(s<60)return s+'秒前';
+  var m=Math.floor(s/60);if(m<60)return m+'分前';
+  var h=Math.floor(m/60);if(h<24)return h+'時間前';
+  return Math.floor(h/24)+'日前';
+}
+function saveSyncMeta(){try{localStorage.setItem('manga_sync_meta',JSON.stringify({lastAt:state.syncLastAt,deviceName:state.deviceName}));}catch(e){}}
+function loadSyncMeta(){try{var _m=localStorage.getItem('manga_sync_meta');if(_m){var _p=JSON.parse(_m);state.syncLastAt=_p.lastAt||0;state.deviceName=_p.deviceName||'';}}catch(e){}}
+
 
 function encryptData(text,pass){
   // XOR-based obfuscation + base64 (simple, no SubtleCrypto dependency issues)
@@ -636,7 +651,7 @@ function syncUpload(){
   state.syncStatus='ing';render();
   fetch(WORKER_URL,{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':token},body:JSON.stringify({data:encrypted})})
     .then(function(r){return r.json();})
-    .then(function(r){state.syncStatus=r.ok?'ok':'err';state.syncModal=false;render();setTimeout(function(){state.syncStatus='';render();},3000);})
+    .then(function(r){if(r.ok){state.syncLastAt=Date.now();state.syncDirty=false;saveSyncMeta();}state.syncStatus=r.ok?'ok':'err';state.syncModal=false;render();setTimeout(function(){state.syncStatus='';render();},3000);})
     .catch(function(){state.syncStatus='err';render();setTimeout(function(){state.syncStatus='';render();},3000);});
 }
 
@@ -932,8 +947,8 @@ function render(){
   var isWM=state.tab==='works';
   app.innerHTML=
     '<div class="top-bar"><select class="work-select" onchange="state.activeWork=parseInt(this.value);save();render()">'+wOpts+'</select></div>'
-    +'<div class="sync-bar"><span class="sync-status'+(state.syncStatus==='ok'?' ok':state.syncStatus==='err'?' err':state.syncStatus==='ing'?' ing':'')+'">'+(state.syncStatus==='ok'?'&#x2713; 同期完了':state.syncStatus==='err'?'&#x2717; エラー':state.syncStatus==='ing'?'同期中...':'')+'</span><button class="btn" style="margin-left:auto" onclick="state.syncModal=true;render()">&#x21C5; 同期</button></div>'
-    +(state.syncModal?'<div class="modal-bg" onclick="if(event.target===this){state.syncModal=false;render()}"><div class="modal" onclick="event.stopPropagation()"><h3>クラウド同期</h3><input type="password" placeholder="同期トークン" value="'+state.syncToken.replace(/"/g,'&quot;')+'" oninput="state.syncToken=this.value"><p style="font-size:11px;color:var(--text3);margin:-8px 0 12px">※ 全端末で同じトークンを使ってください</p><div class="modal-btns"><button onclick="state.syncModal=false;render()">キャンセル</button><button onclick="syncDownload()">&#x2193; 取得</button><button class="btn-primary" onclick="syncUpload()">&#x2191; 送信</button></div></div></div>':'')
+    +'<div class="sync-bar">'+(state.deviceName?'<span style="font-size:11px;color:var(--text3);margin-right:4px">'+state.deviceName+'</span>':'')+'<span class="sync-status'+(state.syncStatus==='ok'?' ok':state.syncStatus==='err'?' err':state.syncStatus==='ing'?' ing':'')+'">'+(state.syncStatus==='ok'?'&#x2713; 同期完了':state.syncStatus==='err'?'&#x2717; エラー':state.syncStatus==='ing'?'同期中...':timeAgo(state.syncLastAt))+'</span>'+'<button class="btn" style="margin-left:auto;position:relative" onclick="state.syncModal=true;render()">&#x21C5; 同期'+(state.syncDirty?'<span style="position:absolute;top:-5px;right:-5px;width:8px;height:8px;background:#e24b4a;border-radius:50%"></span>':'')+'</button></div>'
+    +(state.syncModal?'<div class="modal-bg" onclick="if(event.target===this){state.syncModal=false;render()}"><div class="modal" onclick="event.stopPropagation()"><h3>クラウド同期</h3><input type="password" placeholder="同期トークン" value="'+state.syncToken.replace(/"/g,'&quot;')+'" oninput="state.syncToken=this.value"><input type="text" placeholder="このデバイスの名前（例: Galaxy）" value="'+state.deviceName.replace(/"/g,'&quot;')+'" oninput="state.deviceName=this.value;saveSyncMeta()" style="margin-top:8px"><p style="font-size:11px;color:var(--text3);margin:4px 0 12px">※ 全端末で同じトークンを使ってください</p><div class="modal-btns"><button onclick="state.syncModal=false;render()">キャンセル</button><button onclick="syncDownload()">&#x2193; 取得</button><button class="btn-primary" onclick="syncUpload()">&#x2191; 送信</button></div></div></div>':'')
     +(!isWM?'<div class="logline-bar"><textarea class="logline-input" rows="2" placeholder="ログライン（作品概要）…" onblur="setWorkLogline(this.value)">'+getWorkLogline().replace(/</g,'&lt;')+'</textarea></div>':'')
     +(!isWM?'<div class="quick-add"><textarea id="card-input" rows="3" placeholder="アイデアをメモ…" oninput="state.newText=this.value">'+state.newText.replace(/</g,'&lt;')+'</textarea>'
       +'<div class="quick-footer"><div class="tag-pills">'+tagPills+'</div>'
@@ -959,6 +974,7 @@ function render(){
 
 (function(){
   function init(){
+    loadSyncMeta();
     openDB().then(function(d){db=d;}).catch(function(){db=null;}).then(function(){
       return loadAll();
     }).then(function(){
