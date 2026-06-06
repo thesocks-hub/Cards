@@ -203,7 +203,9 @@ var state={
   syncModal:false,
   syncLastAt:0,
   syncDirty:false,
-  deviceName:''
+  deviceName:'',
+  syncCloudDevice:'',
+  syncCloudAt:0
 };
 
 var db=null;
@@ -618,8 +620,8 @@ function timeAgo(ts){
   var h=Math.floor(m/60);if(h<24)return h+'時間前';
   return Math.floor(h/24)+'日前';
 }
-function saveSyncMeta(){try{localStorage.setItem('manga_sync_meta',JSON.stringify({lastAt:state.syncLastAt,deviceName:state.deviceName}));}catch(e){}}
-function loadSyncMeta(){try{var _m=localStorage.getItem('manga_sync_meta');if(_m){var _p=JSON.parse(_m);state.syncLastAt=_p.lastAt||0;state.deviceName=_p.deviceName||'';}}catch(e){}}
+function saveSyncMeta(){try{localStorage.setItem('manga_sync_meta',JSON.stringify({lastAt:state.syncLastAt,deviceName:state.deviceName,cloudDevice:state.syncCloudDevice,cloudAt:state.syncCloudAt}));}catch(e){}}
+function loadSyncMeta(){try{var _m=localStorage.getItem('manga_sync_meta');if(_m){var _p=JSON.parse(_m);state.syncLastAt=_p.lastAt||0;state.deviceName=_p.deviceName||'';state.syncCloudDevice=_p.cloudDevice||'';state.syncCloudAt=_p.cloudAt||0;}}catch(e){}}
 
 
 function encryptData(text,pass){
@@ -640,19 +642,54 @@ function decryptData(b64,pass){
 function syncUpload(){
   var token=state.syncToken.trim();
   if(!token){alert('同期トークンを入力してください');return;}
-  // スケッチ込みで全カードを含める
   var cards=state.cards.map(function(c){return Object.assign({},c);});
-  var data=JSON.stringify({works:state.works,activeWork:state.activeWork,cards:cards,nextId:state.nextId,pageData:state.pageData,secLoglines:state.secLoglines,secSortMode:state.secSortMode});
+  // デバイス名と送信時刻をペイロードに含める
+  var now=Date.now();
+  var data=JSON.stringify({
+    works:state.works,activeWork:state.activeWork,cards:cards,nextId:state.nextId,
+    pageData:state.pageData,secLoglines:state.secLoglines,secSortMode:state.secSortMode,
+    _syncDevice:state.deviceName||'不明',_syncAt:now
+  });
   var encrypted=encryptData(data,token);
-  // 25MB制限チェック
   if(encrypted.length>24*1024*1024){
     alert('データが大きすぎます（25MB超）。スケッチを減らしてから試してください。');return;
   }
   state.syncStatus='ing';render();
   fetch(WORKER_URL,{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':token},body:JSON.stringify({data:encrypted})})
     .then(function(r){return r.json();})
-    .then(function(r){if(r.ok){state.syncLastAt=Date.now();state.syncDirty=false;saveSyncMeta();}state.syncStatus=r.ok?'ok':'err';state.syncModal=false;render();setTimeout(function(){state.syncStatus='';render();},3000);})
+    .then(function(r){
+      if(r.ok){state.syncLastAt=now;state.syncDirty=false;state.syncCloudDevice=state.deviceName||'不明';state.syncCloudAt=now;saveSyncMeta();}
+      state.syncStatus=r.ok?'ok':'err';state.syncModal=false;render();
+      setTimeout(function(){state.syncStatus='';render();},3000);
+    })
     .catch(function(){state.syncStatus='err';render();setTimeout(function(){state.syncStatus='';render();},3000);});
+}
+
+function syncDownloadSilent(){
+  var token=state.syncToken.trim();
+  if(!token)return;
+  state.syncStatus='ing';render();
+  fetch(WORKER_URL,{headers:{'X-Auth-Token':token}})
+    .then(function(r){return r.json();})
+    .then(function(r){
+      if(!r.data){state.syncStatus='';render();return;}
+      var decrypted=decryptData(r.data,token);
+      if(!decrypted){state.syncStatus='';render();return;}
+      var data=JSON.parse(decrypted);
+      var cloudDevice=data._syncDevice||'不明';
+      var cloudAt=data._syncAt||0;
+      delete data._syncDevice;delete data._syncAt;
+      if(data.works)data.works=data.works.map(function(w){return Object.assign({logline:''},w);});
+      var cards=data.cards||[];
+      cards.forEach(function(c){if(c.sketch)saveSketchStorage(c.id,c.sketch);});
+      var token2=state.syncToken;var device2=state.deviceName;
+      Object.assign(state,data,{showModal:false,sketchModal:null,editingCardId:null,pageAddModal:null,syncModal:false,syncToken:token2,deviceName:device2});
+      state.syncCloudDevice=cloudDevice;state.syncCloudAt=cloudAt;
+      state.syncDirty=false;saveSyncMeta();
+      save();state.syncStatus='ok';render();
+      setTimeout(function(){state.syncStatus='';render();},3000);
+    })
+    .catch(function(){state.syncStatus='';render();});
 }
 
 function syncDownload(){
@@ -666,11 +703,16 @@ function syncDownload(){
       var decrypted=decryptData(r.data,token);
       if(!decrypted){state.syncStatus='err';alert('復号失敗。トークンが違う可能性があります。');render();return;}
       var data=JSON.parse(decrypted);
+      // クラウド上の送信者情報を取り出す
+      var cloudDevice=data._syncDevice||'不明';
+      var cloudAt=data._syncAt||0;
+      delete data._syncDevice;delete data._syncAt;
       if(data.works)data.works=data.works.map(function(w){return Object.assign({logline:''},w);});
-      // スケッチをlocalStorageとIDBに保存
       var cards=data.cards||[];
       cards.forEach(function(c){if(c.sketch)saveSketchStorage(c.id,c.sketch);});
       Object.assign(state,data,{showModal:false,sketchModal:null,editingCardId:null,pageAddModal:null,syncModal:false});
+      state.syncCloudDevice=cloudDevice;state.syncCloudAt=cloudAt;
+      state.syncDirty=false;saveSyncMeta();
       save();state.syncStatus='ok';render();setTimeout(function(){state.syncStatus='';render();},3000);
     })
     .catch(function(){state.syncStatus='err';render();setTimeout(function(){state.syncStatus='';render();},3000);});
@@ -947,7 +989,7 @@ function render(){
   var isWM=state.tab==='works';
   app.innerHTML=
     '<div class="top-bar"><select class="work-select" onchange="state.activeWork=parseInt(this.value);save();render()">'+wOpts+'</select></div>'
-    +'<div class="sync-bar">'+(state.deviceName?'<span style="font-size:11px;color:var(--text3);margin-right:4px">'+state.deviceName+'</span>':'')+'<span class="sync-status'+(state.syncStatus==='ok'?' ok':state.syncStatus==='err'?' err':state.syncStatus==='ing'?' ing':'')+'">'+(state.syncStatus==='ok'?'&#x2713; 同期完了':state.syncStatus==='err'?'&#x2717; エラー':state.syncStatus==='ing'?'同期中...':timeAgo(state.syncLastAt))+'</span>'+'<button class="btn" style="margin-left:auto;position:relative" onclick="state.syncModal=true;render()">&#x21C5; 同期'+(state.syncDirty?'<span style="position:absolute;top:-5px;right:-5px;width:8px;height:8px;background:#e24b4a;border-radius:50%"></span>':'')+'</button></div>'
+    +'<div class="sync-bar">'+(state.deviceName?'<span style="font-size:11px;color:var(--text3);margin-right:4px">'+state.deviceName+'</span>':'')+'<span class="sync-status'+(state.syncStatus==='ok'?' ok':state.syncStatus==='err'?' err':state.syncStatus==='ing'?' ing':'')+'">'+(state.syncStatus==='ok'?'&#x2713; 同期完了':state.syncStatus==='err'?'&#x2717; エラー':state.syncStatus==='ing'?'同期中...':(state.syncCloudDevice&&state.syncCloudAt?state.syncCloudDevice+' / '+timeAgo(state.syncCloudAt):'未同期'))+'</span>'+'<button class="btn" style="margin-left:auto;position:relative" onclick="state.syncModal=true;render()">&#x21C5; 同期'+(state.syncDirty?'<span style="position:absolute;top:-5px;right:-5px;width:8px;height:8px;background:#e24b4a;border-radius:50%"></span>':'')+'</button></div>'
     +(state.syncModal?'<div class="modal-bg" onclick="if(event.target===this){state.syncModal=false;render()}"><div class="modal" onclick="event.stopPropagation()"><h3>クラウド同期</h3><input type="password" placeholder="同期トークン" value="'+state.syncToken.replace(/"/g,'&quot;')+'" oninput="state.syncToken=this.value"><input type="text" placeholder="このデバイスの名前（例: Galaxy）" value="'+state.deviceName.replace(/"/g,'&quot;')+'" oninput="state.deviceName=this.value;saveSyncMeta()" style="margin-top:8px"><p style="font-size:11px;color:var(--text3);margin:4px 0 12px">※ 全端末で同じトークンを使ってください</p><div class="modal-btns"><button onclick="state.syncModal=false;render()">キャンセル</button><button onclick="syncDownload()">&#x2193; 取得</button><button class="btn-primary" onclick="syncUpload()">&#x2191; 送信</button></div></div></div>':'')
     +(!isWM?'<div class="logline-bar"><textarea class="logline-input" rows="2" placeholder="ログライン（作品概要）…" onblur="setWorkLogline(this.value)">'+getWorkLogline().replace(/</g,'&lt;')+'</textarea></div>':'')
     +(!isWM?'<div class="quick-add"><textarea id="card-input" rows="3" placeholder="アイデアをメモ…" oninput="state.newText=this.value">'+state.newText.replace(/</g,'&lt;')+'</textarea>'
@@ -983,6 +1025,10 @@ function render(){
       var n=document.getElementById('db-notice');if(n)n.textContent='読み込みエラー: '+e.message;
     }).then(function(){
       render();
+      // トークンが設定済みなら起動時に自動取得
+      if(state.syncToken.trim()){
+        syncDownloadSilent();
+      }
     });
   }
   init();
